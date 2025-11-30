@@ -239,15 +239,35 @@ def melhoriaSwap(formiga, grafo, grafoPredecessores, tempoTarefaTrabalhador):
         elite_pesada = tarefasOrdenadas[:corte]
         return random.choice(elite_pesada), tarefasOrdenadas
     
-    def trocaPermitida(tarefa, novaEstacaoId, grafo, grafoPredecessores):
-        for pai in grafoPredecessores[tarefa]:
+    def trocaPermitida(tarefaEstacaoPesada, tarefaTroca, estacaoPesadaId, estacaoTrocaId, grafo, grafoPredecessores):
+        # Não permite troca se houver dependência direta entre as tarefas
+        # ou se a troca violar a ordem de precedência da tarefa de troca
+        for pai in grafoPredecessores[tarefaTroca]:
+            if pai == tarefaEstacaoPesada:
+                return False
             estacaoPai = mapaTarefas[pai+1] 
-            if estacaoPai > novaEstacaoId:
+            if estacaoPai > estacaoPesadaId:
+                return False
+        
+        # Não permite troca se houver dependência direta entre as tarefas
+        # ou se a troca violar a ordem de precedência da tarefa de troca
+        for filho in grafo[tarefaTroca]:
+            if filho == tarefaEstacaoPesada:
+                return False
+            estacaoFilho = mapaTarefas[filho+1]
+            if estacaoFilho < estacaoPesadaId:
+                return False
+        
+        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
+        for pai in grafoPredecessores[tarefaEstacaoPesada]:
+            estacaoPai = mapaTarefas[pai+1] 
+            if estacaoPai > estacaoTrocaId:
                 return False
 
-        for filho in grafo[tarefa]:
+        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
+        for filho in grafo[tarefaEstacaoPesada]:
             estacaoFilho = mapaTarefas[filho+1]
-            if estacaoFilho < novaEstacaoId:
+            if estacaoFilho < estacaoTrocaId:
                 return False
 
         return True
@@ -278,7 +298,7 @@ def melhoriaSwap(formiga, grafo, grafoPredecessores, tempoTarefaTrabalhador):
             while(melhoria):
                 tarefaEstacaoComMaisCarga, tarefas1 = tarefaPesadaAleatoria(estacaoComMaisCarga.tarefas, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
                 tarefaParaTrocar, tarefas2 = tarefaPesadaAleatoria(e.tarefas, e.trabalhadorId, tempoTarefaTrabalhador)
-                if trocaPermitida(tarefaEstacaoComMaisCarga-1, i, formiga, grafo, grafoPredecessores) and trocaPermitida(tarefaParaTrocar-1, indiceEstacaoComMaisCarga, formiga, grafo, grafoPredecessores):
+                if trocaPermitida(tarefaEstacaoComMaisCarga-1, tarefaParaTrocar-1, estacaoComMaisCarga, i, formiga, grafo, grafoPredecessores):
                     tarefas1.remove(tarefaEstacaoComMaisCarga)
                     tarefas1.append(tarefaParaTrocar)
                     carga1 = calcularCarga(tarefas1, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
