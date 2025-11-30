@@ -1,4 +1,5 @@
 import math
+import random
 
 NUMERO_TAREFAS = 0
 NUMERO_TRABALHADORES_E_MAQUINAS = 0
@@ -51,10 +52,13 @@ def ler_e_converter_dados(caminho_arquivo):
     except FileNotFoundError:
         print(f"Erro: O arquivo '{caminho_arquivo}' não foi encontrado.")
         return None
-
+    global NUMERO_TAREFAS
+    global NUMERO_TRABALHADORES_E_MAQUINAS
     NUMERO_TAREFAS = int(conteudo[0]) #A primeira linha do arquivo e o numero de tarefas
     NUMERO_TRABALHADORES_E_MAQUINAS = len(conteudo[1].split()) #Ve quantos elementos tem na segunda linha do arquivo para definir o numero de maquinas e trabalhadores
     elementosLinha = []
+    tempoMedioDeCadaTrabalhador = [0]*NUMERO_TRABALHADORES_E_MAQUINAS
+    quantasTarefasCadaTrabalhadorEIncapaz = [0]*NUMERO_TRABALHADORES_E_MAQUINAS 
     lowerBound = 0
     tempoMedio = 0
     #Cria a matriz do tempo de cada trabalhador em cada tarefa
@@ -66,12 +70,14 @@ def ler_e_converter_dados(caminho_arquivo):
         for j in range(len(elementosLinha)): #Transforma todos os elementos de uma linha em inteiros, que sao os tempos de cada trabalhador em cada tarefa
             if elementosLinha[j] == 'Inf':
                 elementosLinha[j] = math.inf
+                quantasTarefasCadaTrabalhadorEIncapaz[j] += 1
             else:
                 trabalhadorApto += 1
                 elementosLinha[j] = int(elementosLinha[j])
                 if(elementosLinha[j] < menorDaLinha):
                     menorDaLinha = elementosLinha[j]
                 tempoMedioTarefa += elementosLinha[j]
+                tempoMedioDeCadaTrabalhador[j] += elementosLinha[j]
                 
         tempoTarefaTrabalhador.append(elementosLinha)
         lowerBound += menorDaLinha 
@@ -79,6 +85,8 @@ def ler_e_converter_dados(caminho_arquivo):
 
     lowerBound = math.ceil(lowerBound/NUMERO_TRABALHADORES_E_MAQUINAS) #Melhor solução no cenario perfeitop
     tempoMedio = (tempoMedio/NUMERO_TRABALHADORES_E_MAQUINAS)
+
+    tempoMedioDeCadaTrabalhador = [tempoMedioDeCadaTrabalhador[i]/NUMERO_TAREFAS - quantasTarefasCadaTrabalhadorEIncapaz[i] for i in range(len(tempoMedioDeCadaTrabalhador))]
     
     #Cria grafo de precedencia das tarefas
     grafo = [[] for _ in range(NUMERO_TAREFAS)]
@@ -93,24 +101,52 @@ def ler_e_converter_dados(caminho_arquivo):
         precedencia[linha[1]-1] += 1
         indice = indice+1
 
-    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio
+    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador
+   
+def sorteiaTrabalhador(scores,soma,candidatos):
+   sorteio = random.uniform(0,soma)
+   acumulado = 0
+   for i in range(len(candidatos)):
+      acumulado += scores[i]
+      if acumulado >= sorteio:
+         return candidatos[i]
 
-def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo):
+def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTrabalhadorEstacao):
+   alpha = 0.3
+   beta = 0.7
+   opcoes = list(range(NUMERO_TRABALHADORES_E_MAQUINAS))
+   probabilidade = []
+   for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
+      scores = []
+      soma = 0
+      for j in range(len(opcoes)):
+         p = ((feromoniosTrabalhadorEstacao[i][j]**beta) *((1/tempoMedioDeCadaTrabalhador[j])**alpha))
+         scores.append(p)
+         soma += p
+      sorteado = sorteiaTrabalhador(scores,soma,opcoes)
+      opcoes.remove(sorteado)
+      formiga.alocarTrabalhador(i,sorteado)
+      
+def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador):
   feromonioInicial = 1/C_alvo
   feromoniosTrabalhadorEstacao = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
   feromoniosTrabalhadorTarefas = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
   melhorGlobal = math.inf
   iteracoesSemMelhoria = 0
-  formigas = [Formiga(i) for i in range(10)]
-  print(formigas)
+  formigas = [Formiga(i) for i in range(100000)]
+  #alocaTrabalhadoresAEstacoes(formigas[0],tempoMedioDeCadaTrabalhador,feromoniosTrabalhadorEstacao)
 
- # while((iteracoesSemMelhoria < 0) and (melhorGlobal > lowerBound)): 
-    
+ # while((iteracoesSemMelhoria < 100) and (melhorGlobal > lowerBound)): 
+  for f in formigas:
+    alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTrabalhadorEstacao)
+    print(f"A formiga escolheu as seguintes alocações")
+    for i in f.estacoes:
+         print(i.idEstacao,i.trabalhadorId)
   
 
 
 
-nome_do_arquivo = 'instancias/teste'
-tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio = ler_e_converter_dados(nome_do_arquivo)
-ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio)
+nome_do_arquivo = 'instancias/23_hes'
+tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nome_do_arquivo)
+ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador)
 
