@@ -8,8 +8,8 @@ import sys
 # ----------------------------
 
 def ler_instancia_alwabp(caminho_arquivo):
-    
-    tnk = [] # Matriz de tempos (N x K)
+
+    t = [] # Matriz de tempos (N x K)
     G = []   # Matriz de Adjacência do Grafo (N x N)
     
     with open(caminho_arquivo, 'r') as f:
@@ -36,7 +36,7 @@ def ler_instancia_alwabp(caminho_arquivo):
             return int(valor)
 
 
-        tnk.append([processar_tempo(x) for x in partes])
+        t.append([processar_tempo(x) for x in partes])
         
         for _ in range(n - 1):
             linha = f.readline().strip()
@@ -44,7 +44,7 @@ def ler_instancia_alwabp(caminho_arquivo):
           
             if len(partes) != k:
                 raise ValueError(f"Erro: Linha de tempo com número incorreto de colunas.")
-            tnk.append([processar_tempo(x) for x in partes])
+            t.append([processar_tempo(x) for x in partes])
 
         # Leitura das Precedências (Grafo G)
         
@@ -65,12 +65,12 @@ def ler_instancia_alwabp(caminho_arquivo):
             
             G[tarefa_i][tarefa_j] = 1
 
-    return n, k, tnk, G
+    return n, k, t, G
 
 
-nome_arquivo = r"C:\\Users\\Mateus\\Documents\\ProgramaçãoMatemática\\Trabalho\\alwabp\\1_ton"
+nome_arquivo = r"C:\\Users\\Mateus\\Documents\\ProgramaçãoMatemática\\Trabalho\\alwabp\\1_hes"
 
-n, k, tnk, G = ler_instancia_alwabp(nome_arquivo)
+n, k, t, G = ler_instancia_alwabp(nome_arquivo)
 e = k
 
 
@@ -88,7 +88,7 @@ modelo  .setObjective(E_max, GRB.MINIMIZE)
 
 # Estação com mais carga:
 for E in range(e):
-    carga_estacao = gp.quicksum(x[N, E, K] * tnk[N][K] for N in range(n) for K in range(k))
+    carga_estacao = gp.quicksum(x[N, E, K] * t[N][K] for N in range(n) for K in range(k))
     modelo.addConstr(carga_estacao <= E_max, name=f"Definicao_Emax_Estacao_{E}")
 
 # Apenas uma estação e um trabalhador executa a tarefa:
@@ -148,8 +148,7 @@ if modelo.status == GRB.OPTIMAL:
         for N in range(n):
             if x[N, E, trabalhador_alocado].X > 0.5:
                 tarefas.append(N+1) # +1 para printar como no arquivo original
-                tempo_total += tnk[N][trabalhador_alocado]
+                tempo_total += t[N][trabalhador_alocado]
         
         print(f"  Tarefas: {tarefas}")
-
         print(f"  Carga Total: {tempo_total}")
