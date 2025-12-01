@@ -8,10 +8,7 @@ import sys
 # ----------------------------
 
 def ler_instancia_alwabp(caminho_arquivo):
-    """
-    Lê uma instância ALWABP do formato especificado.
-    Retorna: N, K, tnk (matriz de tempos), G (matriz de precedência)
-    """
+    
     tnk = [] # Matriz de tempos (N x K)
     G = []   # Matriz de Adjacência do Grafo (N x N)
     
@@ -154,4 +151,5 @@ if modelo.status == GRB.OPTIMAL:
                 tempo_total += tnk[N][trabalhador_alocado]
         
         print(f"  Tarefas: {tarefas}")
+
         print(f"  Carga Total: {tempo_total}")
