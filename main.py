@@ -1,6 +1,9 @@
 import math
 import random
 import copy
+import os
+import csv
+import time
 
 NUMERO_TAREFAS = 0
 NUMERO_TRABALHADORES_E_MAQUINAS = 0
@@ -24,7 +27,7 @@ class Formiga:
       self.tempoDeCiclo = math.inf
     
     def resetar(self):
-        self.cmax = float('inf')
+        self.tempoDeCiclo = float('inf')
         for estacao in self.estacoes:
             estacao.limpar()
 
@@ -35,16 +38,12 @@ class Formiga:
        self.estacoes[indiceEstacao].tarefas.append(idTarefa)
        self.estacoes[indiceEstacao].carga += tempoExecucao
 
-    def removerTarefa(self, indiceEstacao, idTarefa, tempoExecucao):
-        self.estacoes[indiceEstacao].tarefas.remove(idTarefa)
-        self.estacoes[indiceEstacao].carga -= tempoExecucao
-    
     def calcularTempoDeCiclo(self):
         maior = 0
         for e in self.estacoes:
             if(e.carga > maior):
                 maior = e.carga
-        tempoDeCiclo = maior
+        self.tempoDeCiclo = maior
         return maior 
 
 def ler_e_converter_dados(caminho_arquivo):
@@ -63,7 +62,7 @@ def ler_e_converter_dados(caminho_arquivo):
     NUMERO_TRABALHADORES_E_MAQUINAS = len(conteudo[1].split()) #Ve quantos elementos tem na segunda linha do arquivo para definir o numero de maquinas e trabalhadores
     elementosLinha = []
     tempoMedioDeCadaTrabalhador = [0]*NUMERO_TRABALHADORES_E_MAQUINAS
-    quantasTarefasCadaTrabalhadorEIncapaz = [0]*NUMERO_TRABALHADORES_E_MAQUINAS 
+    tarefasValidasDoTrab = [0]*NUMERO_TRABALHADORES_E_MAQUINAS 
     lowerBound = 0
     tempoMedio = 0
     #Cria a matriz do tempo de cada trabalhador em cada tarefa
@@ -75,9 +74,9 @@ def ler_e_converter_dados(caminho_arquivo):
         for j in range(len(elementosLinha)): #Transforma todos os elementos de uma linha em inteiros, que sao os tempos de cada trabalhador em cada tarefa
             if elementosLinha[j] == 'Inf':
                 elementosLinha[j] = math.inf
-                quantasTarefasCadaTrabalhadorEIncapaz[j] += 1
             else:
                 trabalhadorApto += 1
+                tarefasValidasDoTrab[j] += 1
                 elementosLinha[j] = int(elementosLinha[j])
                 if(elementosLinha[j] < menorDaLinha):
                     menorDaLinha = elementosLinha[j]
@@ -91,7 +90,7 @@ def ler_e_converter_dados(caminho_arquivo):
     lowerBound = math.ceil(lowerBound/NUMERO_TRABALHADORES_E_MAQUINAS) #Melhor solução no cenario perfeitop
     tempoMedio = (tempoMedio/NUMERO_TRABALHADORES_E_MAQUINAS)
 
-    tempoMedioDeCadaTrabalhador = [tempoMedioDeCadaTrabalhador[i]/NUMERO_TAREFAS - quantasTarefasCadaTrabalhadorEIncapaz[i] for i in range(len(tempoMedioDeCadaTrabalhador))]
+    tempoMedioDeCadaTrabalhador = [tempoMedioDeCadaTrabalhador[i]/tarefasValidasDoTrab[i] for i in range(len(tempoMedioDeCadaTrabalhador)) if tarefasValidasDoTrab[i] > 0]
     
     #Cria grafo de precedencia das tarefas
     grafo = [[] for _ in range(NUMERO_TAREFAS)]
@@ -105,33 +104,34 @@ def ler_e_converter_dados(caminho_arquivo):
         grafo[linha[0]-1].append(linha[1]-1)
         precedencia[linha[1]-1] += 1
         indice = indice+1
-    
-    grafoPredecessores = [[] for _ in range(NUMERO_TAREFAS)]
-    for pai, lista_filhos in enumerate(grafo):
-        for filho in lista_filhos:
-            grafoPredecessores[filho].append(pai)
 
-    return tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador
+    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador
    
 def sorteia(scores,soma,candidatos):
+   if soma == 0:
+       return candidatos[0]
+   
    sorteio = random.uniform(0,soma)
    acumulado = 0
    for i in range(len(candidatos)):
       acumulado += scores[i]
       if acumulado >= sorteio:
          return candidatos[i]
+      return candidatos[-1] #Segurança caso haja algum erro de float que bagunce a variavel de acumulação
 
-def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTrabalhadorEstacao):
+def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE):
    #Sorteia um trabalhador para cada estação, com a probabilidade baseada num balanço de Feromonios depositados na escolha e o tempo medio de um trabalhador.
-   alpha = 0.3
-   beta = 0.7
+   alpha = 1
+   beta = 2
    opcoes = list(range(NUMERO_TRABALHADORES_E_MAQUINAS))
-   probabilidade = []
+
    for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
       scores = []
       soma = 0
-      for j in range(len(opcoes)):
-         p = ((feromoniosTrabalhadorEstacao[i][j]**beta) *((1/tempoMedioDeCadaTrabalhador[j])**alpha))
+      for trabalhador in opcoes:
+         tau = feromoniosTE[trabalhador][i]**alpha
+         eta = (1/tempoMedioDeCadaTrabalhador[trabalhador])**beta
+         p = tau*eta
          scores.append(p)
          soma += p
       sorteado = sorteia(scores,soma,opcoes)
@@ -147,8 +147,8 @@ def printaSolução(f):
     print(f"Tempo de ciclo: {f.tempoDeCiclo}")
 
 def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador):
-    alpha = 0.5
-    beta = 0.5
+    alpha = 1
+    beta = 3.0
     tarefas = []
     precedenciaLocal = precedencia[:]
     tarefasFeitas = 0
@@ -158,7 +158,6 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
 
     for iEstacao, e in enumerate(formiga.estacoes):
         ehUltima = (iEstacao == len(formiga.estacoes) - 1) #Flag pra saber se e a ultima tarefa
-
         while(tarefasFeitas < NUMERO_TAREFAS):
 
             if not ehUltima and e.carga >= C_alvo: #Se nao for a ultima e ja tiver ultrapassado a carga media, va pra proxima estação
@@ -217,11 +216,12 @@ def evaporacao(m1,m2):
             if m2[i][j] == 0: #Proteção pro feromonio nao chegar em 0
                 m2[i][j] = 0.0001
 
-def depositarFeromonios(formiga,mTE,mT):
-    adicionado = 1/formiga.tempoDeCiclo
-
-    for e in formiga.estacoes:
-        mTE[e.trabalhadorId][e.idEstacao] += adicionado
+def depositarFeromonios(formigas,mTE,mT):
+    for f in formigas: 
+        adicionado = 1/f.tempoDeCiclo
+        
+        for e in f.estacoes:
+            mTE[e.trabalhadorId][e.idEstacao] += adicionado
         
         for t in e.tarefas:
             mT[e.idEstacao][t] += adicionado
@@ -348,24 +348,25 @@ def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
     melhorGlobal = math.inf
     iteracoesSemMelhoria = 0
-    formigas = [Formiga(i) for i in range(10)]
+    formigas = [Formiga(i) for i in range(200)]
     melhorFormigaGlobal = None
 
-    while((iteracoesSemMelhoria < 10000) and (melhorGlobal > lowerBound)):
+    while((iteracoesSemMelhoria < 200) and (melhorGlobal > lowerBound)):
         melhorFormigaLocal = None
         for f in formigas:
             f.resetar() #Reseta a formiga para a nova iteração
             alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTE)
             alocaTarefas(f,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador)
             #printaSolução(f)
-            melhoriaSwap(f, grafo, grafoPredecessores, tempoTarefaTrabalhador)
+            #Algoritmo de melhoria para a solução de cada formiga entra aqui
             f.calcularTempoDeCiclo()
 
             if  melhorFormigaLocal is None or f.tempoDeCiclo < melhorFormigaLocal.tempoDeCiclo:
                 melhorFormigaLocal = f 
 
+        #print(melhorFormigaLocal.tempoDeCiclo)
         if melhorFormigaLocal.tempoDeCiclo < melhorGlobal:
-            print(f"Solução melhorado de: {melhorGlobal} pra {melhorFormigaLocal.tempoDeCiclo}")
+            #print(f"Solução melhorada de: {melhorGlobal} pra {melhorFormigaLocal.tempoDeCiclo}")
             melhorGlobal = melhorFormigaLocal.tempoDeCiclo
             melhorFormigaGlobal = copy.deepcopy(melhorFormigaLocal)
             iteracoesSemMelhoria = 0
@@ -374,14 +375,29 @@ def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,
         
         evaporacao(feromoniosTE,feromoniosTarefas)
         if melhorFormigaGlobal is not None:
-            depositarFeromonios(melhorFormigaGlobal,feromoniosTE,feromoniosTarefas)
+            formigasValidas = [f for f in formigas if f.tempoDeCiclo < math.inf]
+            formigasValidas.sort(key=lambda x:x.tempoDeCiclo)
+            qtdFormigas = max(1,int(len(formigas)*0.10)) #Pega as 10% melhores formigas
+            melhoresFormigas = formigasValidas[:qtdFormigas]
+            depositarFeromonios(melhoresFormigas,feromoniosTE,feromoniosTarefas)
 
 
     return melhorGlobal
 
-    
+def exe(nomeArquivo):
+   tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nomeArquivo)
+   return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador)
 
-nome_do_arquivo = 'instancias/23_hes'
-tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nome_do_arquivo)
-ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador)
+if __name__ == "__main__":
+    nome_do_arquivo = 'instancias/23_wee.txt' # Exemplo
+    dados = ler_e_converter_dados(nome_do_arquivo)
 
+    if dados:
+        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador = dados
+        print(f"Iniciando ACO isolado... LB={lowerBound}")
+        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador)
+        print(f"Resultado Final: {res}")
+
+#Pontos para aprimorar:
+
+# Usar uma estrategia mais inteligente no peso da heuristica de alocar o trabalhador a estação. Sugestao se a estação e inicial e provavel que tarefas que nao dependem de ninguem ou que dependem de poucos, sejam executadas nelas, logo um trabalhador que realiza bem essas tarefas seria uma escolha melhor
