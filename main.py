@@ -1,6 +1,9 @@
 import math
 import random
 import copy
+import os
+import csv
+import time
 
 NUMERO_TAREFAS = 0
 NUMERO_TRABALHADORES_E_MAQUINAS = 0
@@ -118,8 +121,8 @@ def sorteia(scores,soma,candidatos):
 
 def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE):
    #Sorteia um trabalhador para cada estação, com a probabilidade baseada num balanço de Feromonios depositados na escolha e o tempo medio de um trabalhador.
-   alpha = 0.7
-   beta = 0.3
+   alpha = 1
+   beta = 2
    opcoes = list(range(NUMERO_TRABALHADORES_E_MAQUINAS))
 
    for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
@@ -144,8 +147,8 @@ def printaSolução(f):
     print(f"Tempo de ciclo: {f.tempoDeCiclo}")
 
 def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador):
-    alpha = 0.5
-    beta = 0.5
+    alpha = 1
+    beta = 3.0
     tarefas = []
     precedenciaLocal = precedencia[:]
     tarefasFeitas = 0
@@ -213,11 +216,12 @@ def evaporacao(m1,m2):
             if m2[i][j] == 0: #Proteção pro feromonio nao chegar em 0
                 m2[i][j] = 0.0001
 
-def depositarFeromonios(formiga,mTE,mT):
-    adicionado = 1/formiga.tempoDeCiclo
-
-    for e in formiga.estacoes:
-        mTE[e.trabalhadorId][e.idEstacao] += adicionado
+def depositarFeromonios(formigas,mTE,mT):
+    for f in formigas: 
+        adicionado = 1/f.tempoDeCiclo
+        
+        for e in f.estacoes:
+            mTE[e.trabalhadorId][e.idEstacao] += adicionado
         
         for t in e.tarefas:
             mT[e.idEstacao][t] += adicionado
@@ -228,10 +232,10 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
     melhorGlobal = math.inf
     iteracoesSemMelhoria = 0
-    formigas = [Formiga(i) for i in range(100)]
+    formigas = [Formiga(i) for i in range(200)]
     melhorFormigaGlobal = None
 
-    while((iteracoesSemMelhoria < 500) and (melhorGlobal > lowerBound)):
+    while((iteracoesSemMelhoria < 200) and (melhorGlobal > lowerBound)):
         melhorFormigaLocal = None
         for f in formigas:
             f.resetar() #Reseta a formiga para a nova iteração
@@ -246,7 +250,7 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
 
         #print(melhorFormigaLocal.tempoDeCiclo)
         if melhorFormigaLocal.tempoDeCiclo < melhorGlobal:
-            print(f"Solução melhorada de: {melhorGlobal} pra {melhorFormigaLocal.tempoDeCiclo}")
+            #print(f"Solução melhorada de: {melhorGlobal} pra {melhorFormigaLocal.tempoDeCiclo}")
             melhorGlobal = melhorFormigaLocal.tempoDeCiclo
             melhorFormigaGlobal = copy.deepcopy(melhorFormigaLocal)
             iteracoesSemMelhoria = 0
@@ -255,17 +259,29 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
         
         evaporacao(feromoniosTE,feromoniosTarefas)
         if melhorFormigaGlobal is not None:
-            depositarFeromonios(melhorFormigaGlobal,feromoniosTE,feromoniosTarefas)
+            formigasValidas = [f for f in formigas if f.tempoDeCiclo < math.inf]
+            formigasValidas.sort(key=lambda x:x.tempoDeCiclo)
+            qtdFormigas = max(1,int(len(formigas)*0.10)) #Pega as 10% melhores formigas
+            melhoresFormigas = formigasValidas[:qtdFormigas]
+            depositarFeromonios(melhoresFormigas,feromoniosTE,feromoniosTarefas)
 
 
     return melhorGlobal
 
-nome_do_arquivo = 'instancias/23_wee'
-tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nome_do_arquivo)
-ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador)
+def exe(nomeArquivo):
+   tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nomeArquivo)
+   return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador)
+
+if __name__ == "__main__":
+    nome_do_arquivo = 'instancias/23_wee.txt' # Exemplo
+    dados = ler_e_converter_dados(nome_do_arquivo)
+
+    if dados:
+        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador = dados
+        print(f"Iniciando ACO isolado... LB={lowerBound}")
+        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador)
+        print(f"Resultado Final: {res}")
 
 #Pontos para aprimorar:
 
 # Usar uma estrategia mais inteligente no peso da heuristica de alocar o trabalhador a estação. Sugestao se a estação e inicial e provavel que tarefas que nao dependem de ninguem ou que dependem de poucos, sejam executadas nelas, logo um trabalhador que realiza bem essas tarefas seria uma escolha melhor
-
-#Ao inves de apenas a melhor formiga depositar o feromonio, pode ser 10% melhores ou algo assim.
