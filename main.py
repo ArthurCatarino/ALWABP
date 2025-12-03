@@ -225,8 +225,124 @@ def depositarFeromonios(formigas,mTE,mT):
         
         for t in e.tarefas:
             mT[e.idEstacao][t] += adicionado
+
+def melhoriaSwap(formiga, grafo, grafoPredecessores, tempoTarefaTrabalhador):
+
+    mapaTarefas = {}
+    for i_est, estacao in enumerate(formiga.estacoes):
+        for t in estacao.tarefas:
+            mapaTarefas[t] = i_est
+
+    def tarefaPesadaAleatoria(lista_tarefas, trabalhadorId, tempoTarefaTrabalhador, top_n=5):
+        tarefasOrdenadas = sorted(lista_tarefas, key=lambda t: tempoTarefaTrabalhador[t][trabalhadorId], reverse=True)
+        corte = min(len(tarefasOrdenadas), top_n)
+        elite_pesada = tarefasOrdenadas[:corte]
+        return random.choice(elite_pesada), tarefasOrdenadas
     
-def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador):
+    def trocaPermitida(tarefaEstacaoPesada, tarefaTroca, estacaoPesadaId, estacaoTrocaId, grafo, grafoPredecessores):
+        # Não permite troca se houver dependência direta entre as tarefas
+        # ou se a troca violar a ordem de precedência da tarefa de troca
+        for pai in grafoPredecessores[tarefaTroca]:
+            if pai == tarefaEstacaoPesada:
+                return False
+            estacaoPai = mapaTarefas[pai+1] 
+            if estacaoPai > estacaoPesadaId:
+                return False
+        
+        # Não permite troca se houver dependência direta entre as tarefas
+        # ou se a troca violar a ordem de precedência da tarefa de troca
+        for filho in grafo[tarefaTroca]:
+            if filho == tarefaEstacaoPesada:
+                return False
+            estacaoFilho = mapaTarefas[filho+1]
+            if estacaoFilho < estacaoPesadaId:
+                return False
+        
+        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
+        for pai in grafoPredecessores[tarefaEstacaoPesada]:
+            estacaoPai = mapaTarefas[pai+1] 
+            if estacaoPai > estacaoTrocaId:
+                return False
+
+        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
+        for filho in grafo[tarefaEstacaoPesada]:
+            estacaoFilho = mapaTarefas[filho+1]
+            if estacaoFilho < estacaoTrocaId:
+                return False
+
+        return True
+    
+    def calcularCarga(tarefas, trabalhadorId, tempoTarefaTrabalhador):
+        carga = 0
+        for t in tarefas:
+            carga += tempoTarefaTrabalhador[t][trabalhadorId]
+        
+        return carga
+    
+    estacaoComMaisCarga = None
+    carga = 0
+    for i,e in enumerate(formiga.estacoes):
+        if carga < e.carga:
+            estacaoComMaisCarga = e
+            indiceEstacaoComMaisCarga = i
+            carga = e.carga
+    
+    loopsSemMelhoria = 0
+    while(loopsSemMelhoria < 10):
+        houveTroca = False
+        for i, e in enumerate(formiga.estacoes):
+            if i == indiceEstacaoComMaisCarga:
+                continue
+
+            melhoria = True
+            while(melhoria):
+                tarefaEstacaoComMaisCarga, tarefas1 = tarefaPesadaAleatoria(estacaoComMaisCarga.tarefas, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
+                tarefaParaTrocar, tarefas2 = tarefaPesadaAleatoria(e.tarefas, e.trabalhadorId, tempoTarefaTrabalhador)
+                if trocaPermitida(tarefaEstacaoComMaisCarga-1, tarefaParaTrocar-1, estacaoComMaisCarga, i, formiga, grafo, grafoPredecessores):
+                    tarefas1.remove(tarefaEstacaoComMaisCarga)
+                    tarefas1.append(tarefaParaTrocar)
+                    carga1 = calcularCarga(tarefas1, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
+
+                    tarefas2.remove(tarefaParaTrocar)
+                    tarefas2.append(tarefaEstacaoComMaisCarga)
+                    carga2 = calcularCarga(tarefas2, e.trabalhadorId, tempoTarefaTrabalhador)        
+
+                    if carga1 < estacaoComMaisCarga.carga and carga2 < estacaoComMaisCarga.carga:
+                        cargaTarefa1 = tempoTarefaTrabalhador[tarefaEstacaoComMaisCarga][estacaoComMaisCarga.trabalhadorId]
+                        cargaTarefa2 = tempoTarefaTrabalhador[tarefaParaTrocar][e.trabalhadorId]
+
+                        formiga.removerTarefa(indiceEstacaoComMaisCarga, tarefaEstacaoComMaisCarga, cargaTarefa1)
+                        formiga.removerTarefa(i, tarefaParaTrocar, cargaTarefa2)
+                        
+                        cargaTarefa1 = tempoTarefaTrabalhador[tarefaEstacaoComMaisCarga][e.trabalhadorId]
+                        cargaTarefa2 = tempoTarefaTrabalhador[tarefaParaTrocar][estacaoComMaisCarga.trabalhadorId]
+
+                        formiga.alocarTarefa(indiceEstacaoComMaisCarga, tarefaParaTrocar, cargaTarefa2)
+                        formiga.alocarTarefa(i, tarefaEstacaoComMaisCarga, cargaTarefa1)
+                        houveTroca = True
+                        mapaTarefas[tarefaEstacaoComMaisCarga] = i
+                        mapaTarefas[tarefaParaTrocar] = indiceEstacaoComMaisCarga
+                    else:
+                        melhoria = False
+
+                else:
+                    melhoria = False
+            
+        
+        if not houveTroca: 
+            loopsSemMelhoria += 1
+        else:
+            loopsSemMelhoria = 0
+            carga = 0
+            for i,e in enumerate(formiga.estacoes):
+                if carga < e.carga:
+                    estacaoComMaisCarga = e
+                    indiceEstacaoComMaisCarga = i
+                    carga = e.carga
+    
+
+
+def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador):
     feromonioInicial = 1/C_alvo
     feromoniosTE = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Trabalhador][Estacao]
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
