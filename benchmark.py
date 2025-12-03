@@ -37,7 +37,7 @@ def rodar_comparativo_final(nome_pasta_instancias, arquivo_saida='resultados_fin
         print("Nenhum arquivo encontrado na pasta.")
         return
 
-    print(f"--- INICIANDO BENCHMARK (Limite Gurobi: 1h) ---\n")
+    print(f"--- INICIANDO BENCHMARK (Limite Gurobi: 10min) ---\n")
 
     with open(arquivo_saida, mode='w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile, delimiter=';')
@@ -86,7 +86,7 @@ def rodar_comparativo_final(nome_pasta_instancias, arquivo_saida='resultados_fin
             
             # Chama a função do arquivo solver_gurobi.py
             # Ela retorna 4 valores agora: Obj, Tempo, Status, GapInterno
-            g_ciclo, g_tempo, g_status, g_gap_interno = resolver_gurobi(caminho_completo, time_limit=3600)
+            g_ciclo, g_tempo, g_status, g_gap_interno = resolver_gurobi(caminho_completo, time_limit=600)
             
             # Formatação visual
             s_gur = f"{g_ciclo:.1f}" if g_ciclo != float('inf') else "INF"

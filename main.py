@@ -46,6 +46,19 @@ class Formiga:
         self.tempoDeCiclo = maior
         return maior 
 
+def ordenaTopologicamente(grafo,precedencia):
+    contador = NUMERO_TAREFAS
+    lista = []
+    while(contador > 0):
+        for i in range(NUMERO_TAREFAS):
+            if precedencia[i] == 0:
+                lista.append(i)
+                contador -= 1
+                precedencia[i] = -1
+                for j in grafo[i]:
+                    precedencia[j] -= 1
+    return lista
+
 def ler_e_converter_dados(caminho_arquivo):
     tempoTarefaTrabalhador = []
     try:
@@ -95,7 +108,6 @@ def ler_e_converter_dados(caminho_arquivo):
     #Cria grafo de precedencia das tarefas
     grafo = [[] for _ in range(NUMERO_TAREFAS)]
     precedencia = [0]*NUMERO_TAREFAS
-
     indice = NUMERO_TAREFAS+1
     while(conteudo[indice] != '-1 -1'):
         linha = conteudo[indice].split()
@@ -104,33 +116,58 @@ def ler_e_converter_dados(caminho_arquivo):
         grafo[linha[0]-1].append(linha[1]-1)
         precedencia[linha[1]-1] += 1
         indice = indice+1
+    lista = ordenaTopologicamente(grafo,precedencia[:])
 
-    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador
+    tamanhoBloco = NUMERO_TAREFAS//NUMERO_TRABALHADORES_E_MAQUINAS
+    tarefasFatiadas = [] # A ideia e deixar as tarefas com menos precedencias pras primeiras maquinas.
+    resto = NUMERO_TAREFAS%NUMERO_TRABALHADORES_E_MAQUINAS
+    inicio = 0
+    for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
+        tamanhoAtual = tamanhoBloco +(1 if i < resto else 0)
+        fim = inicio + tamanhoAtual
+        lote = lista[inicio:fim]
+        tarefasFatiadas.append(lote)
+        inicio = fim
+            
+    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador,tarefasFatiadas
    
 def sorteia(scores,soma,candidatos):
-   if soma == 0:
+    if soma == 0:
        return candidatos[0]
    
-   sorteio = random.uniform(0,soma)
-   acumulado = 0
-   for i in range(len(candidatos)):
-      acumulado += scores[i]
-      if acumulado >= sorteio:
-         return candidatos[i]
-      return candidatos[-1] #Segurança caso haja algum erro de float que bagunce a variavel de acumulação
+    sorteio = random.uniform(0,soma)
+    acumulado = 0
+    for i in range(len(candidatos)):
+        acumulado += scores[i]
+        if acumulado >= sorteio:
+            return candidatos[i]
+        return candidatos[-1] #Segurança caso haja algum erro de float que bagunce a variavel de acumulação
 
-def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE):
+def tempoMedioT(tempoTarefaTrabalhador,tarefasFatiadas,estacao):
+    tempos = [0] * NUMERO_TRABALHADORES_E_MAQUINAS
+    divide = [NUMERO_TRABALHADORES_E_MAQUINAS] * NUMERO_TAREFAS
+    for tarefa in tarefasFatiadas[estacao]:
+        for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
+            if tempoTarefaTrabalhador[tarefa][i] == math.inf:
+                divide[i] -= 1
+            else:
+                tempos[i]+= tempoTarefaTrabalhador[tarefa][i]
+    tempos = [tempos[i]/divide[i] for i in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
+    return tempos
+
+def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador):
    #Sorteia um trabalhador para cada estação, com a probabilidade baseada num balanço de Feromonios depositados na escolha e o tempo medio de um trabalhador.
    alpha = 1
    beta = 2
    opcoes = list(range(NUMERO_TRABALHADORES_E_MAQUINAS))
 
    for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
+      tempoMedio = tempoMedioT(tempoTarefaTrabalhador,tarefasFatiadas,i)
       scores = []
       soma = 0
       for trabalhador in opcoes:
          tau = feromoniosTE[trabalhador][i]**alpha
-         eta = (1/tempoMedioDeCadaTrabalhador[trabalhador])**beta
+         eta = (1/tempoMedio[trabalhador])**beta
          p = tau*eta
          scores.append(p)
          soma += p
@@ -159,7 +196,6 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
     for iEstacao, e in enumerate(formiga.estacoes):
         ehUltima = (iEstacao == len(formiga.estacoes) - 1) #Flag pra saber se e a ultima tarefa
         while(tarefasFeitas < NUMERO_TAREFAS):
-
             if not ehUltima and e.carga >= C_alvo: #Se nao for a ultima e ja tiver ultrapassado a carga media, va pra proxima estação
                 break
 
@@ -170,7 +206,7 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
 
             if len(tarefas) == 0: #Caso onde nao a nenhuma tarefa disponivel para ser feita 
                 break
-            
+
             soma = 0
             scores = [0] * len(tarefas)
 
@@ -178,13 +214,13 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
                 tarefaId = tarefas[i]
                 tempoReal = getTempo(e.trabalhadorId,tarefaId)
 
-                if tempoReal == math.inf:
-                    tempoReal = 10000 #Se trabalhador nao for capaz de realizar a tarefa, a solução sera penalizada
+            if tempoReal == math.inf:
+                tempoReal = 10000 #Se trabalhador nao for capaz de realizar a tarefa, a solução sera penalizada
 
-                tau = feromoniosTarefas[e.idEstacao][tarefaId]
-                eta = (1/tempoReal)
-                scores[i] = (tau**alpha) * (eta**beta)
-                soma += scores[i]
+            tau = feromoniosTarefas[e.idEstacao][tarefaId]
+            eta = (1/tempoReal)
+            scores[i] = (tau**alpha) * (eta**beta)
+            soma += scores[i]
 
             sorteado = sorteia(scores,soma,tarefas)
             tempoFinal = getTempo(e.trabalhadorId,sorteado) 
@@ -195,10 +231,12 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
             precedenciaLocal[sorteado] = -1
             for j in grafo[sorteado]:
                 precedenciaLocal[j] = precedenciaLocal[j] -1
-            tarefasFeitas += 1
+                tarefasFeitas += 1
 
-    if tarefasFeitas < NUMERO_TAREFAS: #Se sair do loop e ainda sobrar tarefas, penaliza a formiga
-        formiga.tempoDeCiclo = math.inf
+            if tarefasFeitas < NUMERO_TAREFAS: #Se sair do loop e ainda sobrar tarefas, penaliza a formiga
+                formiga.tempoDeCiclo = math.inf
+            else:
+                formiga.calcularTempoDeCiclo()
 
 def evaporacao(m1,m2):
     rho = 0.1
@@ -340,9 +378,7 @@ def melhoriaSwap(formiga, grafo, grafoPredecessores, tempoTarefaTrabalhador):
                     indiceEstacaoComMaisCarga = i
                     carga = e.carga
     
-
-
-def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador):
+def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas):
     feromonioInicial = 1/C_alvo
     feromoniosTE = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Trabalhador][Estacao]
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
@@ -355,11 +391,10 @@ def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,
         melhorFormigaLocal = None
         for f in formigas:
             f.resetar() #Reseta a formiga para a nova iteração
-            alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTE)
+            alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador)
             alocaTarefas(f,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador)
             #printaSolução(f)
             #Algoritmo de melhoria para a solução de cada formiga entra aqui
-            f.calcularTempoDeCiclo()
 
             if  melhorFormigaLocal is None or f.tempoDeCiclo < melhorFormigaLocal.tempoDeCiclo:
                 melhorFormigaLocal = f 
@@ -385,17 +420,17 @@ def ACO(tempoTarefaTrabalhador,grafo, grafoPredecessores,precedencia,lowerBound,
     return melhorGlobal
 
 def exe(nomeArquivo):
-   tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador = ler_e_converter_dados(nomeArquivo)
-   return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador)
+   tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador, tarefasFatiadas = ler_e_converter_dados(nomeArquivo)
+   return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas)
 
 if __name__ == "__main__":
-    nome_do_arquivo = 'instancias/23_wee.txt' # Exemplo
+    nome_do_arquivo = 'instancias/2_hes'
     dados = ler_e_converter_dados(nome_do_arquivo)
 
     if dados:
-        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador = dados
+        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas = dados
         print(f"Iniciando ACO isolado... LB={lowerBound}")
-        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador)
+        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas)
         print(f"Resultado Final: {res}")
 
 #Pontos para aprimorar:
