@@ -44,7 +44,101 @@ class Formiga:
             if(e.carga > maior):
                 maior = e.carga
         self.tempoDeCiclo = maior
-        return maior 
+        return maior
+    
+    def removerTarefa(self, indiceEstacao, idTarefa, tempoExecucao):
+        self.estacoes[indiceEstacao].tarefas.remove(idTarefa)
+        self.estacoes[indiceEstacao].carga -= tempoExecucao
+
+        if self.estacoes[indiceEstacao].carga < 0.0001:  #Evita erros de ponto flutuante
+            self.estacoes[indiceEstacao].carga = 0
+
+def calcular_order_strength(matrizAdjacencia):
+    #Algoritmo de Floyd-Warshall (ou Fechamento Transitivo), descobre as conexões indiretas: Se A->B e B->C, então marca A->C
+    for k in range(NUMERO_TAREFAS):
+        for i in range(NUMERO_TAREFAS):
+            for j in range(NUMERO_TAREFAS):
+                if matrizAdjacencia[i][k] and matrizAdjacencia[k][j]:
+                    matrizAdjacencia[i][j] = 1
+                    
+    totalRelacoes = sum(sum(linha) for linha in matrizAdjacencia)
+
+    #Calcula qual o numero maxino de relações dado pela formiga (n(n-1))/2
+    maxPossivel = (NUMERO_TAREFAS * (NUMERO_TAREFAS - 1)) / 2 
+
+    if maxPossivel == 0: return 0 # Evita divisão por zero
+    
+    os = totalRelacoes / maxPossivel
+    return os
+
+def auditar_solucao(formiga, grafo, tempoTarefaTrabalhador, num_tarefas):
+    print(f"\n--- AUDITORIA DA FORMIGA {formiga.id} (Ciclo: {formiga.tempoDeCiclo}) ---")
+    
+    erros = 0
+    tarefas_alocadas = set()
+    mapa_tarefa_estacao = {}
+
+    # 1. Verifica integridade das tarefas e trabalhadores
+    for estacao in formiga.estacoes:
+        trab_id = estacao.trabalhadorId
+        
+        if trab_id is None:
+            # Estação vazia é permitida, mas vamos avisar
+            continue
+            
+        for t in estacao.tarefas:
+            # Checa duplicidade
+            if t in tarefas_alocadas:
+                print(f"[ERRO] Tarefa {t} alocada mais de uma vez!")
+                erros += 1
+            tarefas_alocadas.add(t)
+            mapa_tarefa_estacao[t] = estacao.idEstacao
+            
+            # Checa capacidade do trabalhador
+            tempo = tempoTarefaTrabalhador[t][trab_id] # CUIDADO COM OS ÍNDICES [Tarefa][Trab]
+            if tempo == math.inf:
+                print(f"[ERRO] Trab {trab_id} na Est {estacao.idEstacao} NÃO sabe fazer tarefa {t}!")
+                erros += 1
+
+    # 2. Verifica se todas as tarefas foram feitas
+    if len(tarefas_alocadas) != num_tarefas:
+        print(f"[ERRO] Total de tarefas: {num_tarefas}. Alocadas: {len(tarefas_alocadas)}.")
+        erros += 1
+
+    # 3. Verifica Precedência (O ERRO DEVE ESTAR AQUI)
+    # Para cada tarefa, verifica se seus filhos estão em estações >=
+    for pai in range(num_tarefas):
+        if pai not in mapa_tarefa_estacao: continue # Se não foi alocada, já deu erro acima
+        
+        estacao_pai = mapa_tarefa_estacao[pai]
+        
+        for filho in grafo[pai]:
+            if filho in mapa_tarefa_estacao:
+                estacao_filho = mapa_tarefa_estacao[filho]
+                
+                if estacao_pai > estacao_filho:
+                    print(f"[ERRO PRECEDÊNCIA] Pai {pai} (Est {estacao_pai}) está DEPOIS do Filho {filho} (Est {estacao_filho})")
+                    erros += 1
+
+    # 4. Recalcula o Tempo na Unha (Para ver se a soma está certa)
+    cmax_calculado = 0
+    for estacao in formiga.estacoes:
+        trab_id = estacao.trabalhadorId
+        carga_real = 0
+        for t in estacao.tarefas:
+            carga_real += tempoTarefaTrabalhador[t][trab_id]
+        
+        if abs(carga_real - estacao.carga) > 0.1:
+            print(f"[ERRO SOMA] Est {estacao.idEstacao}: Diz {estacao.carga}, mas soma real é {carga_real}")
+            erros += 1
+        
+        if carga_real > cmax_calculado:
+            cmax_calculado = carga_real
+
+    if erros == 0:
+        print(">> SOLUÇÃO VÁLIDA E VERIFICADA! O Gurobi está errado ou mal configurado.")
+    else:
+        print(f">> SOLUÇÃO INVÁLIDA! Encontrados {erros} erros.")
 
 def ordenaTopologicamente(grafo,precedencia):
     contador = NUMERO_TAREFAS
@@ -107,6 +201,7 @@ def ler_e_converter_dados(caminho_arquivo):
     #Cria grafo de precedencia das tarefas (Tarefa -> filhos) e o inverso dele (Tarefa -> pais)
     grafoR = [[]for _ in range(NUMERO_TAREFAS)]
     grafo = [[] for _ in range(NUMERO_TAREFAS)]
+    matrizAdjacencia = [[0]*NUMERO_TAREFAS for _ in range(NUMERO_TAREFAS)]
     precedencia = [0]*NUMERO_TAREFAS
     indice = NUMERO_TAREFAS+1
     while(conteudo[indice] != '-1 -1'):
@@ -115,6 +210,7 @@ def ler_e_converter_dados(caminho_arquivo):
         linha[1] = int(linha[1])
         grafo[linha[0]-1].append(linha[1]-1)
         grafoR[linha[1]-1].append(linha[1]-1)
+        matrizAdjacencia[linha[0]-1][linha[1]-1] = 1
         precedencia[linha[1]-1] += 1
         indice = indice+1
     lista = ordenaTopologicamente(grafo,precedencia[:])
@@ -129,8 +225,8 @@ def ler_e_converter_dados(caminho_arquivo):
         lote = lista[inicio:fim]
         tarefasFatiadas.append(lote)
         inicio = fim
-            
-    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR
+    orderStrenght = calcular_order_strength(matrizAdjacencia)
+    return tempoTarefaTrabalhador,grafo,precedencia,lowerBound,tempoMedio,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,orderStrenght
    
 def sorteia(scores,soma,candidatos):
     if soma == 0:
@@ -156,10 +252,8 @@ def tempoMedioT(tempoTarefaTrabalhador,tarefasFatiadas,estacao):
     tempos = [tempos[i]/divide[i] for i in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
     return tempos
 
-def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador):
+def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador,alpha,beta,orderStrength):
    #Sorteia um trabalhador para cada estação, com a probabilidade baseada num balanço de Feromonios depositados na escolha e o tempo medio de um trabalhador.
-   alpha = 1
-   beta = 2
    opcoes = list(range(NUMERO_TRABALHADORES_E_MAQUINAS))
 
    for i in range(NUMERO_TRABALHADORES_E_MAQUINAS):
@@ -167,9 +261,11 @@ def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE
       scores = []
       soma = 0
       for trabalhador in opcoes:
-         tau = feromoniosTE[trabalhador][i]**alpha
-         eta = (1/tempoMedio[trabalhador])**beta
-         p = tau*eta
+         tau = feromoniosTE[trabalhador][i]
+         hPosicional = orderStrength*1/(tempoMedio[trabalhador]) #Da um peso na heuristica global e posicional pelo OS do grafo
+         hGlobal = (1-orderStrength)*(1/tempoMedioDeCadaTrabalhador[trabalhador])
+         eta = hPosicional+hGlobal
+         p = (tau**alpha)*(eta**beta)
          scores.append(p)
          soma += p
       sorteado = sorteia(scores,soma,opcoes)
@@ -184,9 +280,7 @@ def printaSolução(f):
         f.calcularTempoDeCiclo()
     print(f"Tempo de ciclo: {f.tempoDeCiclo}")
 
-def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador):
-    alpha = 1
-    beta = 3.0
+def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador,alpha,beta):
     tarefas = []
     precedenciaLocal = precedencia[:]
     tarefasFeitas = 0
@@ -244,12 +338,13 @@ def alocaTarefas(formiga,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaT
             precedenciaLocal[sorteado] = -1
             for j in grafo[sorteado]:
                 precedenciaLocal[j] = precedenciaLocal[j] -1
+            
             tarefasFeitas += 1
 
-            if tarefasFeitas < NUMERO_TAREFAS: #Se sair do loop e ainda sobrar tarefas, penaliza a formiga
-                formiga.tempoDeCiclo = math.inf
-            else:
-                formiga.calcularTempoDeCiclo()
+    if tarefasFeitas < NUMERO_TAREFAS: #Se sair do loop e ainda sobrar tarefas, penaliza a formiga
+        formiga.tempoDeCiclo = math.inf
+    else:
+        formiga.calcularTempoDeCiclo()
 
 def evaporacao(m1,m2):
     rho = 0.1
@@ -269,7 +364,7 @@ def evaporacao(m1,m2):
 
 def depositarFeromonios(formigas,mTE,mT):
     for f in formigas: 
-        adicionado = 1/f.tempoDeCiclo
+        adicionado = 100/f.tempoDeCiclo
         
         for e in f.estacoes:
             mTE[e.trabalhadorId][e.idEstacao] += adicionado
@@ -277,139 +372,81 @@ def depositarFeromonios(formigas,mTE,mT):
         for t in e.tarefas:
             mT[e.idEstacao][t] += adicionado
 
-def melhoriaSwap(formiga, grafo, grafoPredecessores, tempoTarefaTrabalhador):
+def shift(formiga,grafo,grafoR,tempoTarefaTrabalhador):
+    melhorou = False
+    while True:
+        movimentoRealizado = False
+        mapaTarefa = {}
+        maior = -1
+        estacaoGargalo = None
+        for e in formiga.estacoes: #Encontra a estacao de maior gargalo
+            if e.carga > maior:
+                maior = e.carga
+                estacaoGargalo = e
+            for t in e.tarefas: #Mapeia as tarefas em um dicionaria para checar a precedencia
+                mapaTarefa[t] = e.idEstacao
 
-    mapaTarefas = {}
-    for i_est, estacao in enumerate(formiga.estacoes):
-        for t in estacao.tarefas:
-            mapaTarefas[t] = i_est
+        tarefasOrdenadas = sorted(estacaoGargalo.tarefas,key=lambda t :tempoTarefaTrabalhador[t][estacaoGargalo.trabalhadorId],reverse=True)
+        for tarefa in tarefasOrdenadas:
+            tempoNaOrigem = tempoTarefaTrabalhador[tarefa][estacaoGargalo.trabalhadorId]
+            for eDestino in formiga.estacoes:
+                if(eDestino.idEstacao == estacaoGargalo.idEstacao): #Pula quando e a propria estação gargalo
+                    continue
+                
+                tempoNoDestino = tempoTarefaTrabalhador[tarefa][eDestino.trabalhadorId]
+                if tempoNoDestino == math.inf: #Verifica se o trabalhador sabe fazer a tarefa
+                    continue
+                
+                novaCargaDestomp = eDestino.carga + tempoNoDestino
+                if novaCargaDestomp >= estacaoGargalo.carga: #Verifica se a mudança vai diminuir o tempo de ciclo
+                    continue
 
-    def tarefaPesadaAleatoria(lista_tarefas, trabalhadorId, tempoTarefaTrabalhador, top_n=5):
-        tarefasOrdenadas = sorted(lista_tarefas, key=lambda t: tempoTarefaTrabalhador[t][trabalhadorId], reverse=True)
-        corte = min(len(tarefasOrdenadas), top_n)
-        elite_pesada = tarefasOrdenadas[:corte]
-        return random.choice(elite_pesada), tarefasOrdenadas
-    
-    def trocaPermitida(tarefaEstacaoPesada, tarefaTroca, estacaoPesadaId, estacaoTrocaId, grafo, grafoPredecessores):
-        # Não permite troca se houver dependência direta entre as tarefas
-        # ou se a troca violar a ordem de precedência da tarefa de troca
-        for pai in grafoPredecessores[tarefaTroca]:
-            if pai == tarefaEstacaoPesada:
-                return False
-            estacaoPai = mapaTarefas[pai+1] 
-            if estacaoPai > estacaoPesadaId.idEstacao:
-                return False
+                valido = True
+                for filho in grafo[tarefa]: #Todos os sucessores da tarefa devem estar em estações >= a estação destino
+                    estacaoFilho = mapaTarefa.get(filho)
+                    if estacaoFilho < eDestino.idEstacao:
+                        valido = False
+                        break
+
+                if not valido: continue
+
+                for pai in grafoR[tarefa]: #Todos os predecessores da tarefa devem estar em estações <= a estação destino
+                    estacaoPai = mapaTarefa.get(pai)
+                    if estacaoPai > eDestino.idEstacao:
+                        valido = False
+                        break
+                if not valido: continue
+
+                formiga.removerTarefa(estacaoGargalo.idEstacao,tarefa,tempoNaOrigem)
+                formiga.alocarTarefa(eDestino.idEstacao,tarefa,tempoNoDestino)
+                movimentoRealizado = True
+                melhorou = True
+                break #Tenta mudar algo denovo agora na nova maior estação
+        if not movimentoRealizado:
+                break
+    if melhorou:
+        formiga.calcularTempoDeCiclo()
+
+    return melhorou
         
-        # Não permite troca se houver dependência direta entre as tarefas
-        # ou se a troca violar a ordem de precedência da tarefa de troca
-        for filho in grafo[tarefaTroca]:
-            if filho == tarefaEstacaoPesada:
-                return False
-            estacaoFilho = mapaTarefas[filho+1]
-            if estacaoFilho < estacaoPesadaId.idEstacao:
-                return False
-        
-        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
-        for pai in grafoPredecessores[tarefaEstacaoPesada]:
-            estacaoPai = mapaTarefas[pai+1] 
-            if estacaoPai > estacaoTrocaId.idEstacao:
-                return False
-
-        # Não permite troca se violar a ordem de precedência da tarefa da estação pesada
-        for filho in grafo[tarefaEstacaoPesada]:
-            estacaoFilho = mapaTarefas[filho+1]
-            if estacaoFilho < estacaoTrocaId:
-                return False
-
-        return True
-    
-    def calcularCarga(tarefas, trabalhadorId, tempoTarefaTrabalhador):
-        carga = 0
-        for t in tarefas:
-            carga += tempoTarefaTrabalhador[t][trabalhadorId]
-        
-        return carga
-    
-    estacaoComMaisCarga = None
-    carga = 0
-    for i,e in enumerate(formiga.estacoes):
-        if carga < e.carga:
-            estacaoComMaisCarga = e
-            indiceEstacaoComMaisCarga = i
-            carga = e.carga
-    
-    loopsSemMelhoria = 0
-    while(loopsSemMelhoria < 10):
-        houveTroca = False
-        for e in formiga.estacoes:
-            if e.idEstacao == indiceEstacaoComMaisCarga:
-                continue
-
-            melhoria = True
-            while(melhoria):
-                tarefaEstacaoComMaisCarga, tarefas1 = tarefaPesadaAleatoria(estacaoComMaisCarga.tarefas, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
-                tarefaParaTrocar, tarefas2 = tarefaPesadaAleatoria(e.tarefas, e.trabalhadorId, tempoTarefaTrabalhador)
-                if trocaPermitida(tarefaEstacaoComMaisCarga-1, tarefaParaTrocar-1, estacaoComMaisCarga, e, grafo, grafoPredecessores):
-                    tarefas1.remove(tarefaEstacaoComMaisCarga)
-                    tarefas1.append(tarefaParaTrocar)
-                    carga1 = calcularCarga(tarefas1, estacaoComMaisCarga.trabalhadorId, tempoTarefaTrabalhador)
-
-                    tarefas2.remove(tarefaParaTrocar)
-                    tarefas2.append(tarefaEstacaoComMaisCarga)
-                    carga2 = calcularCarga(tarefas2, e.trabalhadorId, tempoTarefaTrabalhador)        
-
-                    if carga1 < estacaoComMaisCarga.carga and carga2 < estacaoComMaisCarga.carga:
-                        cargaTarefa1 = tempoTarefaTrabalhador[tarefaEstacaoComMaisCarga][estacaoComMaisCarga.trabalhadorId]
-                        cargaTarefa2 = tempoTarefaTrabalhador[tarefaParaTrocar][e.trabalhadorId]
-
-                        formiga.removerTarefa(indiceEstacaoComMaisCarga, tarefaEstacaoComMaisCarga, cargaTarefa1)
-                        formiga.removerTarefa(i, tarefaParaTrocar, cargaTarefa2)
-                        
-                        cargaTarefa1 = tempoTarefaTrabalhador[tarefaEstacaoComMaisCarga][e.trabalhadorId]
-                        cargaTarefa2 = tempoTarefaTrabalhador[tarefaParaTrocar][estacaoComMaisCarga.trabalhadorId]
-
-                        formiga.alocarTarefa(indiceEstacaoComMaisCarga, tarefaParaTrocar, cargaTarefa2)
-                        formiga.alocarTarefa(i, tarefaEstacaoComMaisCarga, cargaTarefa1)
-                        houveTroca = True
-                        mapaTarefas[tarefaEstacaoComMaisCarga] = i
-                        mapaTarefas[tarefaParaTrocar] = indiceEstacaoComMaisCarga
-
-                        carga = 0
-                        for i,e in enumerate(formiga.estacoes):
-                            if carga < e.carga:
-                                estacaoComMaisCarga = e
-                                indiceEstacaoComMaisCarga = i
-                                carga = e.carga
-                    else:
-                        melhoria = False
-
-                else:
-                    melhoria = False
-            
-        
-        if not houveTroca: 
-            loopsSemMelhoria += 1
-        else:
-            loopsSemMelhoria = 0
-            
-def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR):
+def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,orderStrenght,alpha_trab, beta_trab, alpha_tar, beta_tar,numeroFormigas=200,nIteracoesSemMelhoria=200,):
     feromonioInicial = 1/C_alvo
     feromoniosTE = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Trabalhador][Estacao]
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
     melhorGlobal = math.inf
     iteracoesSemMelhoria = 0
-    formigas = [Formiga(i) for i in range(200)]
+    formigas = [Formiga(i) for i in range(numeroFormigas)]
     melhorFormigaGlobal = None
 
-    while((iteracoesSemMelhoria < 200) and (melhorGlobal > lowerBound)):
+    while((iteracoesSemMelhoria < nIteracoesSemMelhoria) and (melhorGlobal > lowerBound)):
         melhorFormigaLocal = None
         for f in formigas:
             f.resetar() #Reseta a formiga para a nova iteração
-            alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador)
-            alocaTarefas(f,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador)
+            alocaTrabalhadoresAEstacoes(f,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador,alpha_trab, beta_trab,orderStrenght)
+            alocaTarefas(f,feromoniosTarefas,C_alvo,precedencia,grafo,tempoTarefaTrabalhador,alpha_tar, beta_tar)
             #printaSolução(f)
             #Algoritmo de melhoria para a solução de cada formiga entra aqui
-            melhoriaSwap(f,grafo,grafoR,tempoTarefaTrabalhador)
+            shift(f,grafo,grafoR,tempoTarefaTrabalhador)
             if  melhorFormigaLocal is None or f.tempoDeCiclo < melhorFormigaLocal.tempoDeCiclo:
                 melhorFormigaLocal = f 
 
@@ -429,6 +466,7 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
             qtdFormigas = max(1,int(len(formigas)*0.10)) #Pega as 10% melhores formigas
             melhoresFormigas = formigasValidas[:qtdFormigas]
             depositarFeromonios(melhoresFormigas,feromoniosTE,feromoniosTarefas)
+            #auditar_solucao(melhorFormigaGlobal, grafo, tempoTarefaTrabalhador, NUMERO_TAREFAS)
     return melhorGlobal
 
 def exe(nomeArquivo):
@@ -436,12 +474,16 @@ def exe(nomeArquivo):
    return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas)
 
 if __name__ == "__main__":
-    nome_do_arquivo = 'instancias/1_ton'
+    nome_do_arquivo = 'instancias/geral/1_ton'
     dados = ler_e_converter_dados(nome_do_arquivo)
 
     if dados:
-        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR = dados
+        tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,orderStrenght = dados
         print(f"Iniciando ACO isolado... LB={lowerBound}")
-        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR)
+        alpha_trab = 1
+        beta_trab = 2
+        alpha_tarefa = 1
+        beta_tarefa = 3
+        res = ACO(tempoTarefaTrabalhador, grafo, precedencia, lowerBound, tempoMedio, tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,alpha_trab,beta_trab,alpha_tarefa,beta_tarefa,orderStrenght)
         print(f"Resultado Final: {res}")
 

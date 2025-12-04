@@ -2,151 +2,201 @@ import os
 import csv
 import time
 import math
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+
+# Importações para o Google Sheets
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+except ImportError:
+    print("AVISO: Bibliotecas do Google Sheets não instaladas. O upload não funcionará.")
 
 try:
-    # Importa do main.py (ACO e Leitura para o ACO)
     from main import ACO, ler_e_converter_dados
-    
-    # Importa do solver_gurobi.py (Função Wrapper)
     from solver_gurobi import resolver_gurobi
 except ImportError as e:
     print(f"ERRO DE IMPORTAÇÃO: {e}")
-    print("Verifique se 'main.py' e 'solver_gurobi.py' estão na mesma pasta.")
     exit()
 
-def rodar_comparativo_final(nome_pasta_instancias, arquivo_saida='resultados_finais.csv'):
+def enviar_para_google_sheets(nome_arquivo_csv, nome_planilha_google):
+    print(f"\n[CLOUD] Iniciando upload para '{nome_planilha_google}'...", end="")
     
-    # Truque para pegar o caminho correto independente de onde você roda o script
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    try:
+        # Tenta carregar credenciais
+        if not os.path.exists('minhas_credenciais.json'):
+            print(" Erro: Arquivo 'minhas_credenciais.json' não encontrado.")
+            return
+
+        creds = ServiceAccountCredentials.from_json_keyfile_name('minhas_credenciais.json', scope)
+        client = gspread.authorize(creds)
+        
+        # Abre a planilha pelo NOME
+        spreadsheet = client.open(nome_planilha_google)
+        
+        # Lê o CSV gerado
+        with open(nome_arquivo_csv, 'r', encoding='utf-8') as file:
+            csv_content = file.read()
+            
+        # Envia (Importa) para a primeira aba
+        # Nota: Isso SOBRESCREVE o conteúdo da aba 1
+        client.import_csv(spreadsheet.id, csv_content)
+        
+        print(" Sucesso! Planilha atualizada.")
+        
+    except Exception as e:
+        print(f" Falha no upload: {e}")
+
+def extrair_numero_instancia(nome_arquivo):
+    try:
+        return int(nome_arquivo.split('_')[0])
+    except:
+        return 0 
+
+def carregar_otimos_da_pasta(caminho_pasta):
+    arquivo_optimos = os.path.join(caminho_pasta, 'optimos.txt')
+    valores_otimos = []
+    
+    if os.path.exists(arquivo_optimos):
+        with open(arquivo_optimos, 'r') as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha:
+                    try:
+                        valores_otimos.append(int(float(linha)))
+                    except ValueError:
+                        pass 
+    return valores_otimos
+
+def rodar_benchmark_final(pasta_raiz='instancias', arquivo_saida='resultado_final_benchmark.csv'):
+    
     diretorio_script = os.path.dirname(os.path.abspath(__file__))
-    caminho_instancias = os.path.join(diretorio_script, nome_pasta_instancias)
+    caminho_raiz = os.path.join(diretorio_script, pasta_raiz)
     
-    if not os.path.exists(caminho_instancias):
-        print(f"Erro: Pasta '{caminho_instancias}' não encontrada.")
+    if not os.path.exists(caminho_raiz):
+        print(f"Erro: Pasta raiz '{caminho_raiz}' não encontrada.")
         return
 
-    # Filtra arquivos validos
-    arquivos = [
-        f for f in os.listdir(caminho_instancias) 
-        if os.path.isfile(os.path.join(caminho_instancias, f)) and not f.startswith('.')
-    ]
-    arquivos.sort()
+    subpastas = [f for f in os.listdir(caminho_raiz) if os.path.isdir(os.path.join(caminho_raiz, f))]
+    subpastas.sort()
 
-    if not arquivos:
-        print("Nenhum arquivo encontrado na pasta.")
-        return
-
-    print(f"--- INICIANDO BENCHMARK (Limite Gurobi: 10min) ---\n")
+    print(f"--- INICIANDO BENCHMARK EM {len(subpastas)} CLASSES DE INSTÂNCIAS ---\n")
 
     with open(arquivo_saida, mode='w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile, delimiter=';')
         
-        # CABEÇALHO COMPLETO
         header = [
-            'Instancia', 
-            'ACO_Ciclo', 'ACO_Tempo(s)',
-            'Gurobi_Ciclo', 'Gurobi_Tempo(s)', 
-            'Gurobi_Status', 'Gurobi_Gap_Interno(%)', # Colunas novas
-            'Gap_Relativo_ACO_vs_Gurobi(%)' # Comparação final
+            'Classe', 'Instancia', 
+            'Otimo_Conhecido',
+            'ACO_Ciclo', 'ACO_Tempo(s)', 'ACO_Gap_Real(%)',
+            'Gurobi_Ciclo', 'Gurobi_Tempo(s)', 'Gurobi_Status', 'Gurobi_Gap_Interno(%)',
+            'Gap_Relativo_ACO_vs_Gurobi(%)'
         ]
         writer.writerow(header)
 
-        for nome_instancia in arquivos:
-            caminho_completo = os.path.join(caminho_instancias, nome_instancia)
-            print(f"> Processando: {nome_instancia}")
+        for pasta in subpastas:
+            if pasta == 'geral': continue
 
-            # ---------------------------
-            # 1. Executar ACO
-            # ---------------------------
-            print("  [ACO] ...", end="", flush=True)
+            caminho_completo_pasta = os.path.join(caminho_raiz, pasta)
             
-            # Leitura específica para o ACO (formato do main.py)
-            dados = ler_e_converter_dados(caminho_completo)
-            if dados is None: 
-                print(" Erro Leitura ACO")
-                continue
-            
-            t_tarefa_trab, grafo, precedencia, lb, c_alvo, t_medio_trab = dados
-            
-            start_aco = time.time()
-            # Roda a formiga
-            aco_ciclo = ACO(t_tarefa_trab, grafo, precedencia, lb, c_alvo, t_medio_trab)
-            end_aco = time.time()
-            aco_tempo = end_aco - start_aco
-            
-            # Formatação visual
-            s_aco = f"{aco_ciclo:.1f}" if aco_ciclo != math.inf else "INF"
-            print(f" Ciclo: {s_aco} ({aco_tempo:.2f}s)")
+            # --- DEFINIÇÃO DE PARÂMETROS CAMPEÕES ---
+            if pasta == 'hes':
+                p_alpha_trab, p_beta_trab = 0.0, 2.5
+                p_alpha_tar, p_beta_tar   = 2.0, 1.0
+            elif pasta == 'ros':
+                p_alpha_trab, p_beta_trab = 0.5, 3.0
+                p_alpha_tar, p_beta_tar   = 1.0, 2.0
+            elif pasta == 'ton':
+                p_alpha_trab, p_beta_trab = 0.0, 2.0
+                p_alpha_tar, p_beta_tar   = 0.0, 1.5
+            else:
+                p_alpha_trab, p_beta_trab = 1.0, 3.0
+                p_alpha_tar, p_beta_tar   = 1.0, 2.0
 
-            # ---------------------------
-            # 2. Executar Gurobi
-            # ---------------------------
-            print("  [Gurobi] ...", end="", flush=True)
-            
-            # Chama a função do arquivo solver_gurobi.py
-            # Ela retorna 4 valores agora: Obj, Tempo, Status, GapInterno
-            g_ciclo, g_tempo, g_status, g_gap_interno = resolver_gurobi(caminho_completo, time_limit=600)
-            
-            # Formatação visual
-            s_gur = f"{g_ciclo:.1f}" if g_ciclo != float('inf') else "INF"
-            print(f" Ciclo: {s_gur} [{g_status} Gap:{g_gap_interno:.2f}%]")
+            lista_otimos = carregar_otimos_da_pasta(caminho_completo_pasta)
+            tem_gabarito = len(lista_otimos) > 0
 
-            # ---------------------------
-            # 3. Cálculos de Métricas
-            # ---------------------------
+            # Filtro Corrigido (Aceita arquivos sem extensão .txt)
+            arquivos = [
+                f for f in os.listdir(caminho_completo_pasta) 
+                if os.path.isfile(os.path.join(caminho_completo_pasta, f)) 
+                and f != 'optimos.txt' 
+                and not f.startswith('.')
+            ]
+            arquivos.sort(key=extrair_numero_instancia)
 
-            # Gap Relativo (Quanto o ACO perdeu ou ganhou do Gurobi)
-            # (ACO - Gurobi) / Gurobi
-            gap_relativo = "-"
-            if aco_ciclo != math.inf and g_ciclo != float('inf') and g_ciclo > 0:
-                diff = aco_ciclo - g_ciclo
-                val_gap = (diff / g_ciclo) * 100
-                gap_relativo = f"{val_gap:.2f}"
+            print(f"\n>>> Classe: {pasta.upper()} ({len(arquivos)} arquivos)")
+            print(f"    Params: Trab({p_alpha_trab}, {p_beta_trab}) | Tar({p_alpha_tar}, {p_beta_tar})")
 
-            # Escreve linha na planilha
-            writer.writerow([
-                nome_instancia,
-                s_aco, f"{aco_tempo:.4f}",
-                s_gur, f"{g_tempo:.4f}",
-                g_status, f"{g_gap_interno:.4f}",
-                gap_relativo
-            ])
+            for index, nome_instancia in enumerate(arquivos):
+                caminho_instancia = os.path.join(caminho_completo_pasta, nome_instancia)
+                
+                otimo_real = None
+                if tem_gabarito and index < len(lista_otimos):
+                    otimo_real = lista_otimos[index]
+
+                print(f"   > {nome_instancia} (Opt: {otimo_real if otimo_real else '?'}) ... ", end="", flush=True)
+
+                dados = ler_e_converter_dados(caminho_instancia)
+                if dados is None: 
+                    print("Erro Leitura")
+                    continue
+                
+                try:
+                    t_tar_trab, grafo, precedencia, lb_calc, c_alvo, t_med_trab, fatiadas, grafoR,orderStrength = dados
+                except ValueError:
+                    print("Erro no retorno dos dados.")
+                    continue
+
+                # 1. ACO
+                start = time.time()
+                aco_ciclo = ACO(
+                    t_tar_trab, grafo, precedencia, lb_calc, c_alvo, t_med_trab, 
+                    fatiadas, grafoR,orderStrength,
+                    alpha_trab=p_alpha_trab, beta_trab=p_beta_trab,
+                    alpha_tar=p_alpha_tar, beta_tar=p_beta_tar,
+                    numeroFormigas=200, nIteracoesSemMelhoria=300
+                )
+                tempo_aco = time.time() - start
+
+                # 2. Gurobi (Limite 1h = 3600s)
+                # Se quiser pular o Gurobi para teste rápido, comente e ponha gur_ciclo = float('inf')
+                gur_ciclo, gur_tempo, gur_status, gur_gap_int = resolver_gurobi(caminho_instancia, time_limit=600)
+                
+                # 3. Gaps
+                gap_aco = "-"
+                gap_relativo = "-"
+
+                base_comparacao = otimo_real if otimo_real else (gur_ciclo if gur_ciclo != float('inf') else None)
+
+                if base_comparacao and aco_ciclo != float('inf'):
+                    val = ((aco_ciclo - base_comparacao) / base_comparacao) * 100
+                    gap_aco = f"{val:.2f}"
+                
+                if aco_ciclo != float('inf') and gur_ciclo != float('inf') and gur_ciclo > 0:
+                    diff = aco_ciclo - gur_ciclo
+                    val_rel = (diff / gur_ciclo) * 100
+                    gap_relativo = f"{val_rel:.2f}"
+
+                print(f"ACO: {aco_ciclo} | Gurobi: {gur_ciclo} [{gur_status}]")
+
+                s_aco = f"{aco_ciclo:.1f}" if aco_ciclo != float('inf') else "INF"
+                s_gur = f"{gur_ciclo:.1f}" if gur_ciclo != float('inf') else "INF"
+                s_opt = str(otimo_real) if otimo_real else "-"
+                s_gur_gap = f"{gur_gap_int:.2f}" if isinstance(gur_gap_int, (int, float)) else str(gur_gap_int)
+
+                writer.writerow([
+                    pasta, nome_instancia, 
+                    s_opt,
+                    s_aco, f"{tempo_aco:.2f}", gap_aco,
+                    s_gur, f"{gur_tempo:.2f}", gur_status, s_gur_gap,
+                    gap_relativo
+                ])
 
     print(f"\n--- FIM. Resultados salvos em '{arquivo_saida}' ---")
-
-def enviar_para_google_sheets(nome_arquivo_csv, nome_planilha_google):
-    print("  -> Sincronizando com Google Sheets...", end="")
     
-    # Define o escopo
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
-    # Carrega credenciais
-    try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name('minhas_credenciais.json', scope)
-        client = gspread.authorize(creds)
-    except Exception as e:
-        print(f" Erro nas credenciais: {e}")
-        return
-
-    try:
-        # 1. Abre a PLANILHA (O arquivo inteiro)
-        spreadsheet = client.open(nome_planilha_google)
-        
-        # 2. Lê o CSV que você gerou
-        with open(nome_arquivo_csv, 'r', encoding='utf-8') as file:
-            csv_content = file.read()
-            
-        # 3. Manda o CSV para o ID da Planilha (Spreadsheet ID), e não da aba
-        client.import_csv(spreadsheet.id, csv_content)
-        
-        print(" Sucesso!")
-        
-    except gspread.exceptions.SpreadsheetNotFound:
-        print(f" Erro: Planilha '{nome_planilha_google}' não encontrada! Verifique o nome ou se compartilhou com o robô.")
-    except Exception as e:
-        print(f" Erro ao sincronizar: {e}")
+    # 4. Enviar para Google Sheets (Último passo)
+    enviar_para_google_sheets(arquivo_saida, 'TrabalhoPm') # Mude 'TrabalhoPm' para o nome da sua planilha
 
 if __name__ == "__main__":
-    rodar_comparativo_final('instancias')
-    enviar_para_google_sheets('resultados_finais.csv','TrabalhoPm')
+    rodar_benchmark_final('instancias')
