@@ -17,7 +17,7 @@ O projeto é dividido em três módulos principais:
 
 1.  **ACO Híbrido (`main.py`):** Algoritmo de Colônia de Formigas com feromônio em dois níveis, heurísticas baseadas em *Order Strength* e busca local (*Shift*).
 2.  **Solver Exato (`solver_gurobi.py`):** Modelo matemático formal resolvido via Gurobi Optimizer.
-3.  **Benchmark (`benchmark.py`):** Script de automação que executa testes em lote nas instâncias (*Hes, Ros, Ton, Wee*) e gera planilhas comparativas.
+3.  **Benchmark (`benchmark.py`):** Script de automação que executa testes em lote nas instâncias (*Hes, Ros, Ton, Wee*) e gera planilhas comparativas. Parametros ja estao definidos no código, foram decididos atraves de testes com diferentes valores.
 
 ## 🛠️ Pré-requisitos
 
