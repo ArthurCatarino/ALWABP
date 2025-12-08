@@ -1,10 +1,6 @@
 import gurobipy as gp
 from gurobipy import Model, GRB
 
-# ==========================================
-# 1. MÓDULO DE LEITURA DE DADOS
-# ==========================================
-
 def ler_instancia_alwabp(caminho_arquivo):
     """
     Lê o arquivo de texto e estrutura os dados.
@@ -67,10 +63,6 @@ def ler_instancia_alwabp(caminho_arquivo):
     except Exception as e:
         print(f"Erro na leitura do arquivo {caminho_arquivo}: {e}")
         return 0, 0, [], []
-
-# ==========================================
-# 2. MÓDULO MATEMÁTICO (CORE)
-# ==========================================
 
 def construir_e_resolver_modelo(n, k, t, G, time_limit):
     """
@@ -136,10 +128,8 @@ def construir_e_resolver_modelo(n, k, t, G, time_limit):
                     posicao_j = gp.quicksum(E_idx * x[j, E_idx, K] for E_idx in range(e) for K in range(k))
                     modelo.addConstr(posicao_i <= posicao_j, name=f"Prec_{i}_{j}")
 
-        # --- Execução ---
         modelo.optimize()
 
-        # Coleta de Resultados
         if modelo.SolCount > 0:
             status_str = "OTIMO" if modelo.status == GRB.OPTIMAL else "LIMIT_TEMPO"
             gap_interno = modelo.MIPGap * 100 # Em porcentagem
@@ -151,27 +141,19 @@ def construir_e_resolver_modelo(n, k, t, G, time_limit):
         print(f"Erro no Solver Gurobi: {e}")
         return float('inf'), 0, "ErroSolver", 0.0
 
-# ==========================================
-# 3. FUNÇÃO PRINCIPAL (CHAMADA PELO BENCHMARK)
-# ==========================================
-
 def resolver_gurobi(caminho_arquivo, time_limit=3600):
     """
     Função Wrapper: Lê o arquivo e chama o modelo.
     """
-    # 1. Chama a função de leitura
     n, k, t, G = ler_instancia_alwabp(caminho_arquivo)
     
     if n == 0:
         return float('inf'), 0, "ErroLeitura", 0.0
     
-    # 2. Chama a função do modelo
     return construir_e_resolver_modelo(n, k, t, G, time_limit)
 
-# --- Teste Isolado (Opcional) ---
 if __name__ == "__main__":
-    # Teste rápido se rodar este arquivo direto
-    arquivo_teste = "instancias/23_wee.txt" # Ajuste conforme necessário
+    arquivo_teste = "instancias/23_wee.txt" 
     print(f"Testando Gurobi com {arquivo_teste}...")
     res = resolver_gurobi(arquivo_teste, time_limit=10)
     print(f"Resultado: {res}")

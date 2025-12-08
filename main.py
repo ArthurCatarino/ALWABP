@@ -1,8 +1,6 @@
 import math
 import random
 import copy
-import os
-import csv
 import time
 
 NUMERO_TAREFAS = 0
@@ -249,7 +247,7 @@ def tempoMedioT(tempoTarefaTrabalhador,tarefasFatiadas,estacao):
                 divide[i] -= 1
             else:
                 tempos[i]+= tempoTarefaTrabalhador[tarefa][i]
-    tempos = [tempos[i]/divide[i] for i in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
+    tempos = [tempos[i]/divide[i] if divide[i] > 0 else 999999 for i in range(NUMERO_TRABALHADORES_E_MAQUINAS)]
     return tempos
 
 def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE,tarefasFatiadas,tempoTarefaTrabalhador,alpha,beta,orderStrength):
@@ -262,6 +260,10 @@ def alocaTrabalhadoresAEstacoes(formiga,tempoMedioDeCadaTrabalhador,feromoniosTE
       soma = 0
       for trabalhador in opcoes:
          tau = feromoniosTE[trabalhador][i]
+         
+         if tempoMedio[trabalhador] == 0:
+             tempoMedio[trabalhador] = 0.0001
+  
          hPosicional = orderStrength*1/(tempoMedio[trabalhador]) #Da um peso na heuristica global e posicional pelo OS do grafo
          hGlobal = (1-orderStrength)*(1/tempoMedioDeCadaTrabalhador[trabalhador])
          eta = hPosicional+hGlobal
@@ -429,16 +431,26 @@ def shift(formiga,grafo,grafoR,tempoTarefaTrabalhador):
 
     return melhorou
         
-def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,orderStrenght,alpha_trab, beta_trab, alpha_tar, beta_tar,numeroFormigas=200,nIteracoesSemMelhoria=200,):
-    feromonioInicial = 1/C_alvo
+def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas,grafoR,orderStrenght,alpha_trab, beta_trab, alpha_tar, beta_tar,numeroFormigas=200,nIteracoesSemMelhoria=200,tempoLimite=300):
+    startTime = time.time()
+    feromonioInicial = 100/C_alvo
     feromoniosTE = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Trabalhador][Estacao]
     feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
     melhorGlobal = math.inf
     iteracoesSemMelhoria = 0
+    iteracoesSemMelhoriaMS = 0
     formigas = [Formiga(i) for i in range(numeroFormigas)]
     melhorFormigaGlobal = None
-
+    nIteracoes = 0
     while((iteracoesSemMelhoria < nIteracoesSemMelhoria) and (melhorGlobal > lowerBound)):
+        if time.time() - startTime > tempoLimite: 
+            print("Limite de tempo atigindo") 
+            break
+        if iteracoesSemMelhoriaMS > 50:
+            feromoniosTE = [[feromonioInicial for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Trabalhador][Estacao]
+            feromoniosTarefas = [[feromonioInicial for _ in range(NUMERO_TAREFAS)] for _ in range(NUMERO_TRABALHADORES_E_MAQUINAS)] #Matriz [Estacao][Tarefa]
+            iteracoesSemMelhoriaMS = 0
+
         melhorFormigaLocal = None
         for f in formigas:
             f.resetar() #Reseta a formiga para a nova iteração
@@ -457,7 +469,11 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
             melhorFormigaGlobal = copy.deepcopy(melhorFormigaLocal)
             iteracoesSemMelhoria = 0
         else:
+            iteracoesSemMelhoriaMS += 1
             iteracoesSemMelhoria += 1
+        if nIteracoes == 0:
+            solucaoInicial = melhorGlobal
+        nIteracoes += 1
         
         evaporacao(feromoniosTE,feromoniosTarefas)
         if melhorFormigaGlobal is not None:
@@ -466,15 +482,15 @@ def ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeC
             qtdFormigas = max(1,int(len(formigas)*0.10)) #Pega as 10% melhores formigas
             melhoresFormigas = formigasValidas[:qtdFormigas]
             depositarFeromonios(melhoresFormigas,feromoniosTE,feromoniosTarefas)
-            #auditar_solucao(melhorFormigaGlobal, grafo, tempoTarefaTrabalhador, NUMERO_TAREFAS)
-    return melhorGlobal
+            
+    return solucaoInicial,melhorGlobal
 
 def exe(nomeArquivo):
    tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador, tarefasFatiadas = ler_e_converter_dados(nomeArquivo)
    return ACO(tempoTarefaTrabalhador,grafo,precedencia,lowerBound,C_alvo,tempoMedioDeCadaTrabalhador,tarefasFatiadas)
 
 if __name__ == "__main__":
-    nome_do_arquivo = 'instancias/geral/1_ton'
+    nome_do_arquivo = 'instancias/wee/51_wee'
     dados = ler_e_converter_dados(nome_do_arquivo)
 
     if dados:
