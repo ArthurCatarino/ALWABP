@@ -6,9 +6,9 @@ Este repositório contém a implementação de algoritmos para resolução do **
 
 A análise completa, incluindo a modelagem matemática, detalhes da implementação híbrida e a discussão aprofundada dos resultados, está disponível no documento abaixo:
 
-👉 **[Clique aqui para acessar o Relatório Técnico Completo (PDF)](./Relatorio_Final_ALWABP.pdf)**
+* 👉 **[Clique aqui para acessar o Relatório Técnico Completo (PDF)](./Relatorio_Final_ALWABP.pdf)**
 
-👉***[Planilha com resultados detalhados https://docs.google.com/spreadsheets/d/1pq_1FrpysOCSsRL1IiJ-cJYwZ7q3aYZ7Q9jPux9OSoQ/edit?usp=sharing ]***
+* 📊 [Planilha de Resultados Detalhados (Google Sheets)](https://docs.google.com/spreadsheets/d/1pq_1FrpysOCSsRL1IiJ-cJYwZ7q3aYZ7Q9jPux9OSoQ/edit?usp=sharing)
 ---
 
 ## 🚀 Funcionalidades
